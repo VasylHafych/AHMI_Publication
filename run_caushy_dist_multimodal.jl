@@ -12,18 +12,40 @@ using JLD
 using CPUTime
 
 
-PATH = "/home/iwsatlas1/vhafych/MPP-Project/AHMI_publication/NormalDistributionData/normal_dist_1.jld"
-
+# ***************************************
+# Multimodal Cauchy Distribution
 # ***************************************
 
-# Normal Distribtion: 
+PATH = "/home/iwsatlas1/vhafych/MPP-Project/AHMI_publication/CaushyDistributionData/mmod-caushy_dist_4-ffcor-4.jld" # path where data will be saved
 
-fun(x; μ=0, σ=1) = prod(pdf.(Normal(μ, σ), x))
+true_param =(μ1=1, μ2=-1, σ=0.2)
 
-N = 30
-min_v = -10
-max_v = 10
-lgV = N*log(max_v-min_v);
+function fun(x; true_param=true_param)
+    tmp = 1
+    for i in eachindex(x)
+        if i > 2
+            tmp *= pdf(Cauchy(true_param.μ1 + true_param.μ2, true_param.σ), x[i])
+        else 
+            tmp *= 0.5*pdf(Cauchy(true_param.μ1, true_param.σ), x[i]) + 0.5*pdf(Cauchy(true_param.μ2, true_param.σ), x[i])
+        end
+    end
+    return tmp
+end
+
+function LogTrueIntegral(N; max = max_v, min=min_v,  true_param=true_param) 
+    tmp = 0
+    for i in 1:N
+        if i > 2
+            tmp += log(cdf(Cauchy(true_param.μ1 + true_param.μ2,true_param.σ), max_v) - cdf(Cauchy(true_param.μ1 + true_param.μ2,true_param.σ), min_v))
+        else 
+            tmp += log(cdf(Cauchy(true_param.μ1,true_param.σ), max_v) - cdf(Cauchy(true_param.μ1 ,true_param.σ), min_v))
+        end
+    end
+    return tmp
+end
+
+min_v = -8
+max_v = 8
 
 # ***************************************
 
@@ -33,7 +55,7 @@ tuning = AdaptiveMetropolisTuning(
     λ = 0.5,
     α = 0.15..0.35,
     β = 1.5,
-    c = 0.001..0.9
+    c = 1e-4..1e2
 )
 
 convergence = BrooksGelmanConvergence(
@@ -52,7 +74,7 @@ burnin = MCMCBurninStrategy(
     max_nsamples_per_cycle = 1000,
     max_nsteps_per_cycle = 10000,
     max_time_per_cycle = 250,
-    max_ncycles = 100
+    max_ncycles = 200
 )
 
 HMI_Manual_Settings = BAT.HMISettings(BAT.cholesky_partial_whitening!, 
@@ -66,9 +88,9 @@ HMI_Manual_Settings = BAT.HMISettings(BAT.cholesky_partial_whitening!,
     )
 
 log_likelihood = params -> LogDVal((log(fun(params.a))))
-nchains = 5
-nsamples = 2*10^5
-max_time = 100
+nchains = 10
+nsamples = 1*10^5
+max_time = 150
 max_nsteps = 10 * nsamples
 prior_bounds = [min_v, max_v]
 
@@ -106,7 +128,7 @@ function run_integrations(dim_range::StepRange{Int64,Int64}, n_repeat::Int64;
 		lgV_run = dim_run*log(prior_bounds[2]-prior_bounds[1])
         
         ####### Problem-specific 
-		integral_true_run = 0.0 #dim_run*log(cdf(Cauchy(5,1), prior_bounds[2]) - cdf(Cauchy(5,1), prior_bounds[1])) # Problem-specific 
+		integral_true_run = LogTrueIntegral(dim_run) # Problem-specific 
         ####### Problem-specific 
 
 		for n_run in 1:n_repeat
@@ -151,6 +173,8 @@ function run_integrations(dim_range::StepRange{Int64,Int64}, n_repeat::Int64;
 			push!(uns_ahmi_array, log_smpl_int[2])
 
 		end
+		
+		# Save all data after each dimension. This protects from losing data if AHMI/MCMC fails.
 		
 		save_data(deepcopy(n_samples_array), 
             deepcopy(integrals_true_array), 
@@ -228,6 +252,6 @@ function save_data(n_samples_array::Vector{Tuple{Int64,Int64}},
 	)
 end
 
-dim_range = range(2, step=1, stop=31)
+dim_range = range(2, step=1, stop=20)
 
 @CPUtime run_integrations(dim_range, 10)
